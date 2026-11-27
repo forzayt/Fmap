@@ -38,7 +38,9 @@
 - **Small Toast Notification**: Compact, non-intrusive pill toast confirming clipboard status with smooth CSS slide-in animation and automatic 2.5-second dismissal.
 - **Shared View Mode**: Opening a shared link automatically bounds the camera to the full route and provides a streamlined viewing experience.
 
-### 📍 GPS Geolocation & Status Feedback
+### 📍 Live GPS Geolocation & Off-Route Guidance
+- **Continuous Live Tracking**: Uses `navigator.geolocation.watchPosition` to track and update your location live as you move.
+- **Off-Route Dotted Guidance Line**: If your current location deviates off the route (> 20 meters), a live cyan dotted line with dark casing dynamically connects your exact position to the nearest point on the route, updating in real time as you move.
 - **One-Tap Location**: Locate button with high-accuracy positioning, smooth camera fly-to, and an animated pulsing avatar.
 - **Resilient Error Handling**: Informative feedback cards for permissions denied, timeout, unsupported browser, or insecure (non-HTTPS) contexts.
 

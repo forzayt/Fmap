@@ -33,6 +33,14 @@ const satelliteStyle = {
       tileSize: 256,
       maxzoom: 19,
     },
+    'off-route': {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: [] },
+      },
+    },
     route: {
       type: 'geojson',
       data: {
@@ -57,6 +65,29 @@ const satelliteStyle = {
       id: 'esri-reference-labels',
       type: 'raster',
       source: 'esri-reference-labels',
+    },
+    {
+      id: 'off-route-casing',
+      type: 'line',
+      source: 'off-route',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#062a33',
+        'line-width': 7,
+        'line-opacity': 0.65,
+        'line-dasharray': [1, 2],
+      },
+    },
+    {
+      id: 'off-route-line',
+      type: 'line',
+      source: 'off-route',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#00e5ff',
+        'line-width': 4,
+        'line-dasharray': [2, 2],
+      },
     },
     {
       id: 'route-casing',
@@ -235,6 +266,51 @@ async function reverseGeocode(lon, lat) {
   } catch {
     return null
   }
+}
+
+function haversineDistance([lon1, lat1], [lon2, lat2]) {
+  const R = 6371000
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLon = ((lon2 - lon1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+function getClosestPointOnSegment(p, a, b) {
+  const cosLat = Math.cos(((a[1] + b[1]) / 2) * (Math.PI / 180))
+  const dx = (b[0] - a[0]) * cosLat
+  const dy = b[1] - a[1]
+  const lenSq = dx * dx + dy * dy
+  if (lenSq === 0) return a
+
+  const px = (p[0] - a[0]) * cosLat
+  const py = p[1] - a[1]
+  let t = (px * dx + py * dy) / lenSq
+  t = Math.max(0, Math.min(1, t))
+
+  return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]
+}
+
+function findNearestPointOnRoute(point, coordinates) {
+  let minDistance = Infinity
+  let closestPoint = coordinates[0]
+
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const candidate = getClosestPointOnSegment(point, coordinates[i], coordinates[i + 1])
+    const dist = haversineDistance(point, candidate)
+    if (dist < minDistance) {
+      minDistance = dist
+      closestPoint = candidate
+    }
+  }
+
+  return { closestPoint, distance: minDistance }
 }
 
 const locateButtonStyle = {
@@ -435,6 +511,9 @@ export default function App() {
   const [toast, setToast] = useState('')
   const toastTimeoutRef = useRef(null)
   const [routePlaces, setRoutePlaces] = useState(null)
+  const [userCoords, setUserCoords] = useState(null)
+  const userCoordsRef = useRef(null)
+  const watchIdRef = useRef(null)
   const [sharedView, setSharedView] = useState(() => readSharedRoute() !== null)
 
   function updatePlaces(points) {
@@ -515,6 +594,10 @@ export default function App() {
 
     return () => {
       mountedRef.current = false
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current)
+        watchIdRef.current = null
+      }
       if (toastTimeoutRef.current) {
         clearTimeout(toastTimeoutRef.current)
       }
@@ -550,28 +633,65 @@ export default function App() {
   }, [routeCoords])
 
   useEffect(() => {
+    const source = mapRef.current?.getSource('off-route')
+    if (!source) return
+
+    if (!userCoords || !routeCoords || routeCoords.length < 2) {
+      source.setData({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: [] },
+      })
+      return
+    }
+
+    const { closestPoint, distance } = findNearestPointOnRoute(userCoords, routeCoords)
+
+    // When user location is out of the path (> 20 meters), draw the live dotted connector towards the route
+    if (distance > 20) {
+      source.setData({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: [userCoords, closestPoint] },
+      })
+    } else {
+      source.setData({
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: [] },
+      })
+    }
+  }, [userCoords, routeCoords])
+
+  useEffect(() => {
     const map = mapRef.current
     if (!map) return
     map.on('click', handleMapClick)
     return () => map.off('click', handleMapClick)
   }, [])
 
-  function showUserLocation(position) {
+  function handleLocationUpdate(position) {
+    if (!mountedRef.current) return
     const map = mapRef.current
     if (!map) return
 
-    const userLocation = [position.coords.longitude, position.coords.latitude]
+    const coords = [position.coords.longitude, position.coords.latitude]
+    userCoordsRef.current = coords
+    setUserCoords(coords)
 
-    markerRef.current?.remove()
-    markerRef.current = new maplibregl.Marker({ element: createUserMarker() })
-      .setLngLat(userLocation)
-      .addTo(map)
+    if (!markerRef.current) {
+      markerRef.current = new maplibregl.Marker({ element: createUserMarker() })
+        .setLngLat(coords)
+        .addTo(map)
+      map.flyTo({ center: coords, zoom: 15, duration: 1500 })
+    } else {
+      markerRef.current.setLngLat(coords)
+    }
 
-    map.flyTo({ center: userLocation, zoom: 15, duration: 1500 })
     setStatus('granted')
   }
 
-  function requestLocation() {
+  function requestLocation(shouldFly = false) {
     if (!window.isSecureContext) {
       setStatus('insecure')
       return
@@ -582,10 +702,20 @@ export default function App() {
     }
 
     setDetail('')
-    setStatus('requesting')
+    if (status !== 'granted') {
+      setStatus('requesting')
+    }
 
-    navigator.geolocation.getCurrentPosition(
-      showUserLocation,
+    if (shouldFly && userCoordsRef.current && mapRef.current) {
+      mapRef.current.flyTo({ center: userCoordsRef.current, zoom: 15, duration: 1200 })
+    }
+
+    if (watchIdRef.current !== null) {
+      return
+    }
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      handleLocationUpdate,
       (error) => {
         if (!mountedRef.current) return
         if (error.code === error.PERMISSION_DENIED) {
@@ -595,7 +725,7 @@ export default function App() {
           setStatus('error')
         }
       },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 1000 },
     )
   }
 
@@ -844,7 +974,7 @@ export default function App() {
       message =
         'Location is blocked for this site. Click the site icon in the address bar → Location → Allow, then press Try again.'
       action = (
-        <button onClick={requestLocation} style={buttonStyle}>
+        <button onClick={() => requestLocation(true)} style={buttonStyle}>
           Try again
         </button>
       )
@@ -852,7 +982,7 @@ export default function App() {
     case 'error':
       message = `Couldn’t get your location. ${detail}`
       action = (
-        <button onClick={requestLocation} style={buttonStyle}>
+        <button onClick={() => requestLocation(true)} style={buttonStyle}>
           Try again
         </button>
       )
@@ -921,7 +1051,7 @@ export default function App() {
 
       <button
         type="button"
-        onClick={requestLocation}
+        onClick={() => requestLocation(true)}
         disabled={locating}
         title={locating ? 'Finding your location…' : 'Find my location'}
         aria-label="Find my location"
