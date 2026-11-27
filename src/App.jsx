@@ -56,14 +56,25 @@ const satelliteStyle = {
   ],
 }
 
-function createUserDot() {
+function createUserMarker() {
   const el = document.createElement('div')
-  el.style.width = '18px'
-  el.style.height = '18px'
+  el.style.width = '40px'
+  el.style.height = '40px'
   el.style.borderRadius = '50%'
-  el.style.background = '#1a73e8'
-  el.style.border = '3px solid #ffffff'
-  el.style.boxShadow = '0 0 0 2px rgba(26, 115, 232, 0.35), 0 2px 6px rgba(0, 0, 0, 0.45)'
+  el.style.overflow = 'hidden'
+  el.style.background = '#ffffff'
+  el.style.border = '2px solid #1a73e8'
+  el.style.boxSizing = 'border-box'
+  el.style.padding = '3px'
+  el.style.animation = 'fmap-pulse 2s infinite'
+  el.innerHTML = `
+    <img
+      src="/walking.png"
+      alt=""
+      draggable="false"
+      style="width:100%;height:100%;object-fit:contain;display:block;"
+    />
+  `
   return el
 }
 
@@ -366,7 +377,7 @@ export default function App() {
     const userLocation = [position.coords.longitude, position.coords.latitude]
 
     markerRef.current?.remove()
-    markerRef.current = new maplibregl.Marker({ element: createUserDot() })
+    markerRef.current = new maplibregl.Marker({ element: createUserMarker() })
       .setLngLat(userLocation)
       .addTo(map)
 
@@ -665,6 +676,11 @@ export default function App() {
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <style>{`
         @keyframes fmap-spin { to { transform: rotate(360deg); } }
+        @keyframes fmap-pulse {
+          0% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0.55), 0 2px 8px rgba(0, 0, 0, 0.45); }
+          70% { box-shadow: 0 0 0 18px rgba(26, 115, 232, 0), 0 2px 8px rgba(0, 0, 0, 0.45); }
+          100% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0), 0 2px 8px rgba(0, 0, 0, 0.45); }
+        }
         .map-route-mode,
         .map-route-mode .maplibregl-canvas-container,
         .map-route-mode .maplibregl-canvas { cursor: crosshair !important; }
