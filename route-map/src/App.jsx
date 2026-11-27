@@ -283,6 +283,8 @@ export default function App() {
       style: satelliteStyle,
       zoom: 2,
       maxZoom: 19,
+      // Always show the attribution text instead of the collapsible "i" button.
+      attributionControl: { compact: false },
     })
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
