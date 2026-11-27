@@ -121,6 +121,19 @@ async function fetchRoute(points) {
   }
 }
 
+function readSharedRoute() {
+  const hash = window.location.hash
+  if (!hash.startsWith('#route=')) return null
+
+  const points = hash
+    .slice('#route='.length)
+    .split(';')
+    .map((pair) => pair.split(',').map(Number))
+    .filter((pair) => pair.length === 2 && pair.every(Number.isFinite))
+
+  return points.length >= 2 ? points : null
+}
+
 const locateButtonStyle = {
   position: 'absolute',
   top: '10px',
@@ -175,6 +188,19 @@ const resetButtonStyle = {
   fontWeight: 600,
   cursor: 'pointer',
   boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
+}
+
+const shareButtonStyle = {
+  padding: '12px 20px',
+  border: 'none',
+  borderRadius: '999px',
+  background: '#00bcd4',
+  color: '#ffffff',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  fontSize: '14px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  boxShadow: '0 4px 16px rgba(0, 188, 212, 0.45)',
 }
 
 const cardStyle = {
@@ -247,6 +273,7 @@ export default function App() {
   const routeRequestRef = useRef(0)
   const [routeCoords, setRouteCoords] = useState([])
   const [routeError, setRouteError] = useState('')
+  const [shareNotice, setShareNotice] = useState('')
 
   useEffect(() => {
     mountedRef.current = true
@@ -263,8 +290,11 @@ export default function App() {
 
     mapRef.current = map
 
-    // If the user already granted access, locate them without asking again.
-    if (window.isSecureContext && navigator.permissions?.query) {
+    const sharedRoute = readSharedRoute()
+    if (sharedRoute) {
+      restoreRoute(sharedRoute)
+    } else if (window.isSecureContext && navigator.permissions?.query) {
+      // If the user already granted access, locate them without asking again.
       navigator.permissions
         .query({ name: 'geolocation' })
         .then((permission) => {
@@ -384,6 +414,75 @@ export default function App() {
     waypointMarkersRef.current = []
     setRouteCoords([])
     setRouteError('')
+    setShareNotice('')
+
+    if (window.location.hash.startsWith('#route=')) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }
+
+  async function restoreRoute(points) {
+    const map = mapRef.current
+    if (!map) return
+
+    waypointsRef.current = points
+    waypointMarkersRef.current = points.map((point, index) => {
+      let role = 'middle'
+      if (index === 0) role = 'start'
+      else if (index === points.length - 1) role = 'finish'
+      return createWaypointMarker(point, role)
+    })
+
+    const bounds = points.reduce(
+      (result, point) => result.extend(point),
+      new maplibregl.LngLatBounds(points[0], points[0]),
+    )
+    map.fitBounds(bounds, { padding: 80, maxZoom: 15, duration: 0 })
+
+    const requestId = ++routeRequestRef.current
+
+    try {
+      const { coordinates, snapped } = await fetchRoute(points)
+      if (!mountedRef.current || requestId !== routeRequestRef.current) return
+
+      waypointsRef.current = snapped
+      snapped.forEach((location, index) => {
+        waypointMarkersRef.current[index]?.setLngLat(location)
+      })
+      setRouteCoords(coordinates)
+    } catch {
+      if (!mountedRef.current || requestId !== routeRequestRef.current) return
+      setRouteError('Could not load the shared route.')
+    }
+  }
+
+  async function shareRoute() {
+    if (waypointsRef.current.length < 2) return
+
+    const routeParam = waypointsRef.current
+      .map(([lon, lat]) => `${lon.toFixed(5)},${lat.toFixed(5)}`)
+      .join(';')
+    const url = `${window.location.origin}${window.location.pathname}#route=${routeParam}`
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'My route',
+          text: 'Check out this route',
+          url,
+        })
+        return
+      } catch (error) {
+        if (error?.name === 'AbortError') return
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(url)
+      setShareNotice('Route link copied to clipboard.')
+    } catch {
+      setShareNotice(url)
+    }
   }
 
   function createWaypointMarker(point, role) {
@@ -505,6 +604,7 @@ export default function App() {
 
   const locating = status === 'requesting'
   const showCard = ['insecure', 'denied', 'error', 'unsupported'].includes(status)
+  const showShare = !routeMode && routeCoords.length > 0
 
   let message = ''
   let action = null
@@ -583,6 +683,11 @@ export default function App() {
       </button>
 
       <div style={routeControlsStyle}>
+        {showShare && (
+          <button type="button" onClick={shareRoute} style={shareButtonStyle}>
+            Share route
+          </button>
+        )}
         <button type="button" onClick={resetRoute} style={resetButtonStyle}>
           Reset route
         </button>
@@ -590,6 +695,15 @@ export default function App() {
           {routeMode ? 'Finish route' : 'Create route'}
         </button>
       </div>
+
+      {shareNotice && (
+        <div style={cardStyle}>
+          <span>{shareNotice}</span>
+          <button onClick={() => setShareNotice('')} style={buttonStyle}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {routeError && (
         <div style={cardStyle}>
