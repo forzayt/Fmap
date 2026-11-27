@@ -284,6 +284,7 @@ export default function App() {
   const [routeCoords, setRouteCoords] = useState([])
   const [routeError, setRouteError] = useState('')
   const [shareNotice, setShareNotice] = useState('')
+  const [sharedView, setSharedView] = useState(() => readSharedRoute() !== null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -304,6 +305,7 @@ export default function App() {
 
     const sharedRoute = readSharedRoute()
     if (sharedRoute) {
+      setSharedView(true)
       restoreRoute(sharedRoute)
     } else if (window.isSecureContext && navigator.permissions?.query) {
       // If the user already granted access, locate them without asking again.
@@ -694,23 +696,25 @@ export default function App() {
         )}
       </button>
 
-      <div style={routeControlsStyle}>
-        {showShare && (
-          <button type="button" onClick={shareRoute} style={shareButtonStyle}>
-            Share route
+      {!sharedView && (
+        <div style={routeControlsStyle}>
+          {showShare && (
+            <button type="button" onClick={shareRoute} style={shareButtonStyle}>
+              Share route
+            </button>
+          )}
+          <button type="button" onClick={resetRoute} style={resetButtonStyle}>
+            Reset route
           </button>
-        )}
-        <button type="button" onClick={resetRoute} style={resetButtonStyle}>
-          Reset route
-        </button>
-        <button
-          type="button"
-          onClick={toggleRouteMode}
-          style={routeMode ? finishRouteButtonStyle : createRouteButtonStyle}
-        >
-          {routeMode ? 'Finish route' : 'Create route'}
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={toggleRouteMode}
+            style={routeMode ? finishRouteButtonStyle : createRouteButtonStyle}
+          >
+            {routeMode ? 'Finish route' : 'Create route'}
+          </button>
+        </div>
+      )}
 
       {shareNotice && (
         <div style={cardStyle}>
