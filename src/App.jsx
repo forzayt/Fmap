@@ -163,18 +163,28 @@ const routeControlsStyle = {
   gap: '10px',
 }
 
-const routeButtonStyle = {
+const routeButtonBaseStyle = {
   padding: '12px 28px',
   border: 'none',
   borderRadius: '999px',
-  background: '#00bcd4',
   color: '#ffffff',
   fontFamily: 'system-ui, -apple-system, sans-serif',
   fontSize: '15px',
   fontWeight: 600,
   letterSpacing: '0.2px',
   cursor: 'pointer',
-  boxShadow: '0 4px 16px rgba(0, 188, 212, 0.45)',
+}
+
+const createRouteButtonStyle = {
+  ...routeButtonBaseStyle,
+  background: '#ef5350',
+  boxShadow: '0 4px 16px rgba(239, 83, 80, 0.45)',
+}
+
+const finishRouteButtonStyle = {
+  ...routeButtonBaseStyle,
+  background: '#43a047',
+  boxShadow: '0 4px 16px rgba(67, 160, 71, 0.45)',
 }
 
 const resetButtonStyle = {
@@ -693,7 +703,11 @@ export default function App() {
         <button type="button" onClick={resetRoute} style={resetButtonStyle}>
           Reset route
         </button>
-        <button type="button" onClick={toggleRouteMode} style={routeButtonStyle}>
+        <button
+          type="button"
+          onClick={toggleRouteMode}
+          style={routeMode ? finishRouteButtonStyle : createRouteButtonStyle}
+        >
           {routeMode ? 'Finish route' : 'Create route'}
         </button>
       </div>
