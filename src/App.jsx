@@ -17,6 +17,22 @@ const satelliteStyle = {
       attribution:
         'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
     },
+    'esri-transportation': {
+      type: 'raster',
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+    },
+    'esri-reference-labels': {
+      type: 'raster',
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+    },
     route: {
       type: 'geojson',
       data: {
@@ -31,6 +47,16 @@ const satelliteStyle = {
       id: 'esri-world-imagery',
       type: 'raster',
       source: 'esri-world-imagery',
+    },
+    {
+      id: 'esri-transportation',
+      type: 'raster',
+      source: 'esri-transportation',
+    },
+    {
+      id: 'esri-reference-labels',
+      type: 'raster',
+      source: 'esri-reference-labels',
     },
     {
       id: 'route-casing',
@@ -170,6 +196,47 @@ async function copyText(text) {
   }
 }
 
+const geocodeCache = new Map()
+
+async function reverseGeocode(lon, lat) {
+  const key = `${lon.toFixed(4)},${lat.toFixed(4)}`
+  if (geocodeCache.has(key)) return geocodeCache.get(key)
+
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=16`,
+      {
+        headers: {
+          'Accept-Language': 'en',
+        },
+      },
+    )
+    if (!response.ok) return null
+    const data = await response.json()
+    const address = data.address || {}
+    const primary =
+      data.name ||
+      address.road ||
+      address.pedestrian ||
+      address.suburb ||
+      address.neighbourhood ||
+      address.city ||
+      address.town ||
+      address.village
+    const secondary = address.city || address.town || address.state || address.country
+    let place = primary
+    if (primary && secondary && primary !== secondary) {
+      place = `${primary}, ${secondary}`
+    } else if (!place) {
+      place = secondary || data.display_name?.split(',')[0] || 'Unknown Place'
+    }
+    geocodeCache.set(key, place)
+    return place
+  } catch {
+    return null
+  }
+}
+
 const locateButtonStyle = {
   position: 'absolute',
   top: '10px',
@@ -272,6 +339,29 @@ const toastStyle = {
   whiteSpace: 'nowrap',
 }
 
+const routeSummaryStyle = {
+  position: 'absolute',
+  top: '16px',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 10,
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  padding: '8px 18px',
+  borderRadius: '999px',
+  background: 'rgba(18, 22, 28, 0.92)',
+  color: '#ffffff',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  fontSize: '13px',
+  fontWeight: 500,
+  boxShadow: '0 4px 16px rgba(0, 0, 0, 0.35)',
+  maxWidth: 'min(640px, calc(100% - 32px))',
+  whiteSpace: 'nowrap',
+  pointerEvents: 'none',
+  animation: 'fmap-toast-in 0.2s ease',
+}
+
 const cardStyle = {
   position: 'absolute',
   bottom: '84px',
@@ -344,7 +434,39 @@ export default function App() {
   const [routeError, setRouteError] = useState('')
   const [toast, setToast] = useState('')
   const toastTimeoutRef = useRef(null)
+  const [routePlaces, setRoutePlaces] = useState(null)
   const [sharedView, setSharedView] = useState(() => readSharedRoute() !== null)
+
+  function updatePlaces(points) {
+    if (!points || points.length === 0) {
+      setRoutePlaces(null)
+      return
+    }
+
+    if (points.length === 1) {
+      reverseGeocode(points[0][0], points[0][1]).then((start) => {
+        if (mountedRef.current && waypointsRef.current.length === 1) {
+          setRoutePlaces({ start: start || 'Start point', end: '' })
+        }
+      })
+      return
+    }
+
+    const startPoint = points[0]
+    const endPoint = points[points.length - 1]
+
+    Promise.all([
+      reverseGeocode(startPoint[0], startPoint[1]),
+      reverseGeocode(endPoint[0], endPoint[1]),
+    ]).then(([start, end]) => {
+      if (mountedRef.current && waypointsRef.current.length >= 2) {
+        setRoutePlaces({
+          start: start || 'Start',
+          end: end || 'Destination',
+        })
+      }
+    })
+  }
 
   function showToast(text) {
     if (toastTimeoutRef.current) {
@@ -504,6 +626,7 @@ export default function App() {
     setRouteCoords([])
     setRouteError('')
     setToast('')
+    setRoutePlaces(null)
 
     if (window.location.hash.startsWith('#route=')) {
       window.history.replaceState(null, '', window.location.pathname + window.location.search)
@@ -515,6 +638,7 @@ export default function App() {
     if (!map) return
 
     waypointsRef.current = points
+    updatePlaces(points)
     waypointMarkersRef.current = points.map((point, index) => {
       let role = 'middle'
       if (index === 0) role = 'start'
@@ -564,7 +688,9 @@ export default function App() {
       try {
         await navigator.share({
           title: 'My route',
-          text: 'Check out this route',
+          text: routePlaces?.end
+            ? `Route from ${routePlaces.start} to ${routePlaces.end}`
+            : 'Check out this route',
           url,
         })
       } catch {
@@ -587,6 +713,12 @@ export default function App() {
     })
       .setLngLat(point)
       .addTo(mapRef.current)
+
+    reverseGeocode(point[0], point[1]).then((name) => {
+      if (name && element) {
+        element.title = name
+      }
+    })
 
     marker.getElement().addEventListener('click', (event) => {
       event.stopPropagation()
@@ -621,6 +753,7 @@ export default function App() {
     const remaining = waypointsRef.current.filter((_, pointIndex) => pointIndex !== index)
     waypointsRef.current = remaining
     rebuildWaypointMarkers()
+    updatePlaces(remaining)
 
     // Invalidate any route request that is still in flight.
     const requestId = ++routeRequestRef.current
@@ -661,6 +794,7 @@ export default function App() {
 
     const next = [...previous, point]
     waypointsRef.current = next
+    updatePlaces(next)
 
     const marker = createWaypointMarker(point, next.length === 1 ? 'start' : 'middle')
     waypointMarkersRef.current.push(marker)
@@ -760,6 +894,30 @@ export default function App() {
       `}</style>
 
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+
+      {routePlaces && (
+        <div style={routeSummaryStyle}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ color: '#4ade80', fontSize: '11px' }}>●</span>
+            <span style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {routePlaces.start}
+            </span>
+          </span>
+          {routePlaces.end ? (
+            <>
+              <span style={{ opacity: 0.5 }}>→</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ color: '#ef5350', fontSize: '11px' }}>●</span>
+                <span style={{ maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {routePlaces.end}
+                </span>
+              </span>
+            </>
+          ) : (
+            <span style={{ opacity: 0.6, fontSize: '12px' }}>(click map for destination)</span>
+          )}
+        </div>
+      )}
 
       <button
         type="button"
