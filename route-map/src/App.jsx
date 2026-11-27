@@ -93,6 +93,22 @@ function createStartArrow() {
   return el
 }
 
+function createFinishFlag() {
+  const el = document.createElement('div')
+  el.style.width = '30px'
+  el.style.height = '30px'
+  el.style.cursor = 'pointer'
+  el.style.filter = 'drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45))'
+  el.innerHTML = `
+    <svg width="30" height="30" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M6 2 V22" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" />
+      <path d="M6 2 V22" stroke="#2e7d32" stroke-width="2.5" stroke-linecap="round" />
+      <path d="M7 3 H20 L16.5 7.5 L20 12 H7 Z" fill="#43a047" stroke="#ffffff" stroke-width="1.3" stroke-linejoin="round" />
+    </svg>
+  `
+  return el
+}
+
 async function fetchRoute(points) {
   const coordinates = points.map(([lon, lat]) => `${lon},${lat}`).join(';')
   const response = await fetch(`${OSRM_URL}/${coordinates}?overview=full&geometries=geojson`)
@@ -123,12 +139,18 @@ const locateButtonStyle = {
   cursor: 'pointer',
 }
 
-const routeButtonStyle = {
+const routeControlsStyle = {
   position: 'absolute',
   bottom: '24px',
   left: '50%',
   transform: 'translateX(-50%)',
   zIndex: 10,
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+}
+
+const routeButtonStyle = {
   padding: '12px 28px',
   border: 'none',
   borderRadius: '999px',
@@ -140,6 +162,19 @@ const routeButtonStyle = {
   letterSpacing: '0.2px',
   cursor: 'pointer',
   boxShadow: '0 4px 16px rgba(0, 188, 212, 0.45)',
+}
+
+const resetButtonStyle = {
+  padding: '12px 20px',
+  border: 'none',
+  borderRadius: '999px',
+  background: 'rgba(18, 22, 28, 0.85)',
+  color: '#ffffff',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  fontSize: '14px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
 }
 
 const cardStyle = {
@@ -327,12 +362,19 @@ export default function App() {
     if (routeModeRef.current) {
       routeModeRef.current = false
       setRouteMode(false)
+      rebuildWaypointMarkers()
       return
     }
 
     clearRoute()
     routeModeRef.current = true
     setRouteMode(true)
+  }
+
+  function resetRoute() {
+    clearRoute()
+    routeModeRef.current = false
+    setRouteMode(false)
   }
 
   function clearRoute() {
@@ -344,9 +386,17 @@ export default function App() {
     setRouteError('')
   }
 
-  function createWaypointMarker(point, isStart) {
+  function createWaypointMarker(point, role) {
+    const element =
+      role === 'start'
+        ? createStartArrow()
+        : role === 'finish'
+          ? createFinishFlag()
+          : createWaypointDot()
+
     const marker = new maplibregl.Marker({
-      element: isStart ? createStartArrow() : createWaypointDot(),
+      element,
+      anchor: role === 'finish' ? 'bottom' : 'center',
     })
       .setLngLat(point)
       .addTo(mapRef.current)
@@ -363,10 +413,16 @@ export default function App() {
     const map = mapRef.current
     if (!map) return
 
+    const points = waypointsRef.current
+    const finished = !routeModeRef.current
+
     waypointMarkersRef.current.forEach((marker) => marker.remove())
-    waypointMarkersRef.current = waypointsRef.current.map((point, index) =>
-      createWaypointMarker(point, index === 0),
-    )
+    waypointMarkersRef.current = points.map((point, index) => {
+      let role = 'middle'
+      if (index === 0) role = 'start'
+      else if (finished && index === points.length - 1) role = 'finish'
+      return createWaypointMarker(point, role)
+    })
   }
 
   async function removeWaypoint(marker) {
@@ -395,6 +451,7 @@ export default function App() {
       snapped.forEach((location, snappedIndex) => {
         waypointMarkersRef.current[snappedIndex]?.setLngLat(location)
       })
+      waypointsRef.current = snapped
       setRouteCoords(coordinates)
       setRouteError('')
     } catch {
@@ -418,7 +475,7 @@ export default function App() {
     const next = [...previous, point]
     waypointsRef.current = next
 
-    const marker = createWaypointMarker(point, next.length === 1)
+    const marker = createWaypointMarker(point, next.length === 1 ? 'start' : 'middle')
     waypointMarkersRef.current.push(marker)
 
     if (next.length < 2) return
@@ -432,6 +489,7 @@ export default function App() {
       snapped.forEach((location, index) => {
         waypointMarkersRef.current[index]?.setLngLat(location)
       })
+      waypointsRef.current = snapped
       setRouteCoords(coordinates)
       setRouteError('')
     } catch {
@@ -524,9 +582,14 @@ export default function App() {
         )}
       </button>
 
-      <button type="button" onClick={toggleRouteMode} style={routeButtonStyle}>
-        {routeMode ? 'Finish route' : 'Create route'}
-      </button>
+      <div style={routeControlsStyle}>
+        <button type="button" onClick={resetRoute} style={resetButtonStyle}>
+          Reset route
+        </button>
+        <button type="button" onClick={toggleRouteMode} style={routeButtonStyle}>
+          {routeMode ? 'Finish route' : 'Create route'}
+        </button>
+      </div>
 
       {routeError && (
         <div style={cardStyle}>
