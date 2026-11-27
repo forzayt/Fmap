@@ -145,6 +145,31 @@ function readSharedRoute() {
   return points.length >= 2 ? points : null
 }
 
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Fall through to the legacy method.
+    }
+  }
+
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return copied
+  } catch {
+    return false
+  }
+}
+
 const locateButtonStyle = {
   position: 'absolute',
   top: '10px',
@@ -224,6 +249,29 @@ const shareButtonStyle = {
   boxShadow: '0 4px 16px rgba(0, 188, 212, 0.45)',
 }
 
+const toastStyle = {
+  position: 'absolute',
+  bottom: '84px',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 30,
+  display: 'flex',
+  alignItems: 'center',
+  gap: '8px',
+  padding: '8px 16px',
+  borderRadius: '999px',
+  background: 'rgba(18, 22, 28, 0.92)',
+  color: '#ffffff',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  fontSize: '13px',
+  fontWeight: 500,
+  letterSpacing: '0.2px',
+  boxShadow: '0 6px 20px rgba(0, 0, 0, 0.35)',
+  pointerEvents: 'none',
+  animation: 'fmap-toast-in 0.2s ease',
+  whiteSpace: 'nowrap',
+}
+
 const cardStyle = {
   position: 'absolute',
   bottom: '84px',
@@ -294,8 +342,21 @@ export default function App() {
   const routeRequestRef = useRef(0)
   const [routeCoords, setRouteCoords] = useState([])
   const [routeError, setRouteError] = useState('')
-  const [shareNotice, setShareNotice] = useState('')
+  const [toast, setToast] = useState('')
+  const toastTimeoutRef = useRef(null)
   const [sharedView, setSharedView] = useState(() => readSharedRoute() !== null)
+
+  function showToast(text) {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current)
+    }
+    setToast(text)
+    toastTimeoutRef.current = setTimeout(() => {
+      if (mountedRef.current) {
+        setToast('')
+      }
+    }, 2500)
+  }
 
   useEffect(() => {
     mountedRef.current = true
@@ -332,6 +393,9 @@ export default function App() {
 
     return () => {
       mountedRef.current = false
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current)
+      }
       routeRequestRef.current += 1
       markerRef.current?.remove()
       markerRef.current = null
@@ -439,7 +503,7 @@ export default function App() {
     waypointMarkersRef.current = []
     setRouteCoords([])
     setRouteError('')
-    setShareNotice('')
+    setToast('')
 
     if (window.location.hash.startsWith('#route=')) {
       window.history.replaceState(null, '', window.location.pathname + window.location.search)
@@ -489,6 +553,13 @@ export default function App() {
       .join(';')
     const url = `${window.location.origin}${window.location.pathname}#route=${routeParam}`
 
+    // Start the copy immediately so it keeps the click's user activation.
+    copyText(url).then((copied) => {
+      if (mountedRef.current) {
+        showToast(copied ? 'Route link copied to clipboard' : 'Could not copy the link')
+      }
+    })
+
     if (navigator.share) {
       try {
         await navigator.share({
@@ -496,17 +567,9 @@ export default function App() {
           text: 'Check out this route',
           url,
         })
-        return
-      } catch (error) {
-        if (error?.name === 'AbortError') return
+      } catch {
+        // Sharing was cancelled or unavailable; the link is already copied.
       }
-    }
-
-    try {
-      await navigator.clipboard.writeText(url)
-      setShareNotice('Route link copied to clipboard.')
-    } catch {
-      setShareNotice(url)
     }
   }
 
@@ -676,6 +739,16 @@ export default function App() {
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <style>{`
         @keyframes fmap-spin { to { transform: rotate(360deg); } }
+        @keyframes fmap-toast-in {
+          from {
+            opacity: 0;
+            transform: translate(-50%, 8px);
+          }
+          to {
+            opacity: 1;
+            transform: translate(-50%, 0);
+          }
+        }
         @keyframes fmap-pulse {
           0% { box-shadow: 0 0 0 0 rgba(26, 115, 232, 0.55), 0 2px 8px rgba(0, 0, 0, 0.45); }
           70% { box-shadow: 0 0 0 18px rgba(26, 115, 232, 0), 0 2px 8px rgba(0, 0, 0, 0.45); }
@@ -732,12 +805,22 @@ export default function App() {
         </div>
       )}
 
-      {shareNotice && (
-        <div style={cardStyle}>
-          <span>{shareNotice}</span>
-          <button onClick={() => setShareNotice('')} style={buttonStyle}>
-            Dismiss
-          </button>
+      {toast && (
+        <div style={toastStyle} role="status" aria-live="polite">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#4ade80"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          <span>{toast}</span>
         </div>
       )}
 
