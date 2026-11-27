@@ -79,6 +79,20 @@ function createWaypointDot() {
   return el
 }
 
+function createStartArrow() {
+  const el = document.createElement('div')
+  el.style.width = '30px'
+  el.style.height = '30px'
+  el.style.cursor = 'pointer'
+  el.style.filter = 'drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45))'
+  el.innerHTML = `
+    <svg width="30" height="30" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d="M12 2 L21.5 22 L12 17.2 L2.5 22 Z" fill="#e53935" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round" />
+    </svg>
+  `
+  return el
+}
+
 async function fetchRoute(points) {
   const coordinates = points.map(([lon, lat]) => `${lon},${lat}`).join(';')
   const response = await fetch(`${OSRM_URL}/${coordinates}?overview=full&geometries=geojson`)
@@ -330,17 +344,40 @@ export default function App() {
     setRouteError('')
   }
 
+  function createWaypointMarker(point, isStart) {
+    const marker = new maplibregl.Marker({
+      element: isStart ? createStartArrow() : createWaypointDot(),
+    })
+      .setLngLat(point)
+      .addTo(mapRef.current)
+
+    marker.getElement().addEventListener('click', (event) => {
+      event.stopPropagation()
+      removeWaypoint(marker)
+    })
+
+    return marker
+  }
+
+  function rebuildWaypointMarkers() {
+    const map = mapRef.current
+    if (!map) return
+
+    waypointMarkersRef.current.forEach((marker) => marker.remove())
+    waypointMarkersRef.current = waypointsRef.current.map((point, index) =>
+      createWaypointMarker(point, index === 0),
+    )
+  }
+
   async function removeWaypoint(marker) {
     if (!routeModeRef.current) return
 
     const index = waypointMarkersRef.current.indexOf(marker)
     if (index === -1) return
 
-    waypointMarkersRef.current.splice(index, 1)
-    marker.remove()
-
     const remaining = waypointsRef.current.filter((_, pointIndex) => pointIndex !== index)
     waypointsRef.current = remaining
+    rebuildWaypointMarkers()
 
     // Invalidate any route request that is still in flight.
     const requestId = ++routeRequestRef.current
@@ -381,15 +418,8 @@ export default function App() {
     const next = [...previous, point]
     waypointsRef.current = next
 
-    const marker = new maplibregl.Marker({ element: createWaypointDot() })
-      .setLngLat(point)
-      .addTo(map)
+    const marker = createWaypointMarker(point, next.length === 1)
     waypointMarkersRef.current.push(marker)
-
-    marker.getElement().addEventListener('click', (clickEvent) => {
-      clickEvent.stopPropagation()
-      removeWaypoint(marker)
-    })
 
     if (next.length < 2) return
 
