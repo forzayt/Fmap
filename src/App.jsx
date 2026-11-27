@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
+const OSRM_URL = 'https://router.project-osrm.org/route/v1/driving'
+
 const satelliteStyle = {
   version: 8,
   sources: {
@@ -15,12 +17,41 @@ const satelliteStyle = {
       attribution:
         'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
     },
+    route: {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'LineString', coordinates: [] },
+      },
+    },
   },
   layers: [
     {
       id: 'esri-world-imagery',
       type: 'raster',
       source: 'esri-world-imagery',
+    },
+    {
+      id: 'route-casing',
+      type: 'line',
+      source: 'route',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#062a33',
+        'line-width': 9,
+        'line-opacity': 0.6,
+      },
+    },
+    {
+      id: 'route-line',
+      type: 'line',
+      source: 'route',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#00e5ff',
+        'line-width': 5,
+      },
     },
   ],
 }
@@ -34,6 +65,29 @@ function createUserDot() {
   el.style.border = '3px solid #ffffff'
   el.style.boxShadow = '0 0 0 2px rgba(26, 115, 232, 0.35), 0 2px 6px rgba(0, 0, 0, 0.45)'
   return el
+}
+
+function createWaypointDot() {
+  const el = document.createElement('div')
+  el.style.width = '14px'
+  el.style.height = '14px'
+  el.style.borderRadius = '50%'
+  el.style.background = '#00e5ff'
+  el.style.border = '3px solid #ffffff'
+  el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.45)'
+  return el
+}
+
+async function fetchRoute(points) {
+  const coordinates = points.map(([lon, lat]) => `${lon},${lat}`).join(';')
+  const response = await fetch(`${OSRM_URL}/${coordinates}?overview=full&geometries=geojson`)
+  if (!response.ok) throw new Error(`Routing request failed (${response.status})`)
+  const data = await response.json()
+  if (data.code !== 'Ok' || !data.routes?.length) throw new Error('No route found')
+  return {
+    coordinates: data.routes[0].geometry.coordinates,
+    snapped: data.waypoints?.map((waypoint) => waypoint.location) ?? points,
+  }
 }
 
 const locateButtonStyle = {
@@ -136,6 +190,14 @@ export default function App() {
   const [status, setStatus] = useState('idle')
   const [detail, setDetail] = useState('')
 
+  const [routeMode, setRouteMode] = useState(false)
+  const routeModeRef = useRef(false)
+  const waypointsRef = useRef([])
+  const waypointMarkersRef = useRef([])
+  const routeRequestRef = useRef(0)
+  const [routeCoords, setRouteCoords] = useState([])
+  const [routeError, setRouteError] = useState('')
+
   useEffect(() => {
     mountedRef.current = true
 
@@ -165,11 +227,42 @@ export default function App() {
 
     return () => {
       mountedRef.current = false
+      routeRequestRef.current += 1
       markerRef.current?.remove()
       markerRef.current = null
+      waypointMarkersRef.current.forEach((marker) => marker.remove())
+      waypointMarkersRef.current = []
       mapRef.current = null
       map.remove()
     }
+  }, [])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (container) container.classList.toggle('map-route-mode', routeMode)
+
+    const map = mapRef.current
+    if (map) {
+      if (routeMode) map.doubleClickZoom.disable()
+      else map.doubleClickZoom.enable()
+    }
+  }, [routeMode])
+
+  useEffect(() => {
+    const source = mapRef.current?.getSource('route')
+    if (!source) return
+    source.setData({
+      type: 'Feature',
+      properties: {},
+      geometry: { type: 'LineString', coordinates: routeCoords },
+    })
+  }, [routeCoords])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    map.on('click', handleMapClick)
+    return () => map.off('click', handleMapClick)
   }, [])
 
   function showUserLocation(position) {
@@ -213,6 +306,71 @@ export default function App() {
       },
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     )
+  }
+
+  function toggleRouteMode() {
+    if (routeModeRef.current) {
+      routeModeRef.current = false
+      setRouteMode(false)
+      return
+    }
+
+    clearRoute()
+    routeModeRef.current = true
+    setRouteMode(true)
+  }
+
+  function clearRoute() {
+    routeRequestRef.current += 1
+    waypointsRef.current = []
+    waypointMarkersRef.current.forEach((marker) => marker.remove())
+    waypointMarkersRef.current = []
+    setRouteCoords([])
+    setRouteError('')
+  }
+
+  async function handleMapClick(event) {
+    const map = mapRef.current
+    if (!routeModeRef.current || !map) return
+
+    const point = [event.lngLat.lng, event.lngLat.lat]
+    const previous = waypointsRef.current
+    const last = previous[previous.length - 1]
+
+    if (last && Math.abs(last[0] - point[0]) < 1e-6 && Math.abs(last[1] - point[1]) < 1e-6) {
+      return
+    }
+
+    const next = [...previous, point]
+    waypointsRef.current = next
+
+    const marker = new maplibregl.Marker({ element: createWaypointDot() })
+      .setLngLat(point)
+      .addTo(map)
+    waypointMarkersRef.current.push(marker)
+
+    if (next.length < 2) return
+
+    const requestId = ++routeRequestRef.current
+
+    try {
+      const { coordinates, snapped } = await fetchRoute(next)
+      if (!mountedRef.current || requestId !== routeRequestRef.current) return
+
+      snapped.forEach((location, index) => {
+        waypointMarkersRef.current[index]?.setLngLat(location)
+      })
+      setRouteCoords(coordinates)
+      setRouteError('')
+    } catch {
+      if (!mountedRef.current || requestId !== routeRequestRef.current) return
+
+      // Drop the point that could not be routed.
+      waypointsRef.current = previous
+      marker.remove()
+      waypointMarkersRef.current = waypointMarkersRef.current.filter((item) => item !== marker)
+      setRouteError('Could not build a route to that point. Try clicking closer to a road.')
+    }
   }
 
   const locating = status === 'requesting'
@@ -261,7 +419,12 @@ export default function App() {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <style>{`@keyframes fmap-spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes fmap-spin { to { transform: rotate(360deg); } }
+        .map-route-mode,
+        .map-route-mode .maplibregl-canvas-container,
+        .map-route-mode .maplibregl-canvas { cursor: crosshair !important; }
+      `}</style>
 
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
@@ -289,9 +452,18 @@ export default function App() {
         )}
       </button>
 
-      <button type="button" style={routeButtonStyle}>
-        Create route
+      <button type="button" onClick={toggleRouteMode} style={routeButtonStyle}>
+        {routeMode ? 'Finish route' : 'Create route'}
       </button>
+
+      {routeError && (
+        <div style={cardStyle}>
+          <span>{routeError}</span>
+          <button onClick={() => setRouteError('')} style={buttonStyle}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {showCard && (
         <div style={cardStyle}>
