@@ -75,6 +75,7 @@ function createWaypointDot() {
   el.style.background = '#00e5ff'
   el.style.border = '3px solid #ffffff'
   el.style.boxShadow = '0 0 0 1px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.45)'
+  el.style.cursor = 'pointer'
   return el
 }
 
@@ -329,6 +330,42 @@ export default function App() {
     setRouteError('')
   }
 
+  async function removeWaypoint(marker) {
+    if (!routeModeRef.current) return
+
+    const index = waypointMarkersRef.current.indexOf(marker)
+    if (index === -1) return
+
+    waypointMarkersRef.current.splice(index, 1)
+    marker.remove()
+
+    const remaining = waypointsRef.current.filter((_, pointIndex) => pointIndex !== index)
+    waypointsRef.current = remaining
+
+    // Invalidate any route request that is still in flight.
+    const requestId = ++routeRequestRef.current
+
+    if (remaining.length < 2) {
+      setRouteCoords([])
+      setRouteError('')
+      return
+    }
+
+    try {
+      const { coordinates, snapped } = await fetchRoute(remaining)
+      if (!mountedRef.current || requestId !== routeRequestRef.current) return
+
+      snapped.forEach((location, snappedIndex) => {
+        waypointMarkersRef.current[snappedIndex]?.setLngLat(location)
+      })
+      setRouteCoords(coordinates)
+      setRouteError('')
+    } catch {
+      if (!mountedRef.current || requestId !== routeRequestRef.current) return
+      setRouteError('Could not recalculate the route. Try again.')
+    }
+  }
+
   async function handleMapClick(event) {
     const map = mapRef.current
     if (!routeModeRef.current || !map) return
@@ -348,6 +385,11 @@ export default function App() {
       .setLngLat(point)
       .addTo(map)
     waypointMarkersRef.current.push(marker)
+
+    marker.getElement().addEventListener('click', (clickEvent) => {
+      clickEvent.stopPropagation()
+      removeWaypoint(marker)
+    })
 
     if (next.length < 2) return
 
