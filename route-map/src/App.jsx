@@ -54,9 +54,28 @@ const locateButtonStyle = {
   cursor: 'pointer',
 }
 
+const routeButtonStyle = {
+  position: 'absolute',
+  bottom: '24px',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  zIndex: 10,
+  padding: '12px 28px',
+  border: 'none',
+  borderRadius: '999px',
+  background: '#00bcd4',
+  color: '#ffffff',
+  fontFamily: 'system-ui, -apple-system, sans-serif',
+  fontSize: '15px',
+  fontWeight: 600,
+  letterSpacing: '0.2px',
+  cursor: 'pointer',
+  boxShadow: '0 4px 16px rgba(0, 188, 212, 0.45)',
+}
+
 const cardStyle = {
   position: 'absolute',
-  bottom: '40px',
+  bottom: '84px',
   left: '50%',
   transform: 'translateX(-50%)',
   zIndex: 10,
@@ -268,6 +287,10 @@ export default function App() {
         ) : (
           <LocateIcon />
         )}
+      </button>
+
+      <button type="button" style={routeButtonStyle}>
+        Create route
       </button>
 
       {showCard && (
