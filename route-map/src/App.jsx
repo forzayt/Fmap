@@ -14,8 +14,6 @@ const satelliteStyle = {
       ],
       tileSize: 256,
       maxzoom: 19,
-      attribution:
-        'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
     },
     'esri-transportation': {
       type: 'raster',
@@ -567,8 +565,7 @@ export default function App() {
       style: satelliteStyle,
       zoom: 2,
       maxZoom: 19,
-      // Always show the attribution text instead of the collapsible "i" button.
-      attributionControl: { compact: false },
+      attributionControl: false,
     })
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
@@ -1021,6 +1018,7 @@ export default function App() {
         .map-route-mode,
         .map-route-mode .maplibregl-canvas-container,
         .map-route-mode .maplibregl-canvas { cursor: crosshair !important; }
+        .maplibregl-ctrl-attrib { display: none !important; }
       `}</style>
 
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
