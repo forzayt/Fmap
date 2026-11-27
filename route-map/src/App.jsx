@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 
-const KOLLAM = [76.6141, 8.8932]
-
 const satelliteStyle = {
   version: 8,
   sources: {
@@ -36,6 +34,24 @@ function createUserDot() {
   el.style.border = '3px solid #ffffff'
   el.style.boxShadow = '0 0 0 2px rgba(26, 115, 232, 0.35), 0 2px 6px rgba(0, 0, 0, 0.45)'
   return el
+}
+
+const locateButtonStyle = {
+  position: 'absolute',
+  top: '10px',
+  left: '10px',
+  zIndex: 10,
+  width: '40px',
+  height: '40px',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  border: 'none',
+  borderRadius: '8px',
+  background: '#ffffff',
+  color: '#1a1a1a',
+  boxShadow: '0 0 0 2px rgba(0, 0, 0, 0.1)',
+  cursor: 'pointer',
 }
 
 const cardStyle = {
@@ -71,12 +87,34 @@ const buttonStyle = {
   cursor: 'pointer',
 }
 
+function LocateIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="7" />
+      <line x1="12" y1="2" x2="12" y2="5" />
+      <line x1="12" y1="19" x2="12" y2="22" />
+      <line x1="2" y1="12" x2="5" y2="12" />
+      <line x1="19" y1="12" x2="22" y2="12" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
 export default function App() {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const markerRef = useRef(null)
   const mountedRef = useRef(false)
-  const [status, setStatus] = useState('checking')
+  const [status, setStatus] = useState('idle')
   const [detail, setDetail] = useState('')
 
   useEffect(() => {
@@ -85,8 +123,7 @@ export default function App() {
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: satelliteStyle,
-      center: KOLLAM,
-      zoom: 13,
+      zoom: 2,
       maxZoom: 19,
     })
 
@@ -95,25 +132,16 @@ export default function App() {
 
     mapRef.current = map
 
-    // Browsers only expose geolocation on HTTPS or localhost.
-    if (!window.isSecureContext) {
-      setStatus('insecure')
-    } else if (!('geolocation' in navigator)) {
-      setStatus('unsupported')
-    } else if (navigator.permissions?.query) {
+    // If the user already granted access, locate them without asking again.
+    if (window.isSecureContext && navigator.permissions?.query) {
       navigator.permissions
         .query({ name: 'geolocation' })
         .then((permission) => {
-          if (!mountedRef.current) return
-          if (permission.state === 'granted') requestLocation()
-          else if (permission.state === 'denied') setStatus('denied')
-          else setStatus('idle')
+          if (mountedRef.current && permission.state === 'granted') {
+            requestLocation()
+          }
         })
-        .catch(() => {
-          if (mountedRef.current) setStatus('idle')
-        })
-    } else {
-      setStatus('idle')
+        .catch(() => {})
     }
 
     return () => {
@@ -141,6 +169,10 @@ export default function App() {
   }
 
   function requestLocation() {
+    if (!window.isSecureContext) {
+      setStatus('insecure')
+      return
+    }
     if (!('geolocation' in navigator)) {
       setStatus('unsupported')
       return
@@ -164,27 +196,17 @@ export default function App() {
     )
   }
 
-  const showCard = status !== 'granted' && status !== 'dismissed' && status !== 'checking'
+  const locating = status === 'requesting'
+  const showCard = ['insecure', 'denied', 'error', 'unsupported'].includes(status)
 
   let message = ''
   let action = null
 
   switch (status) {
-    case 'idle':
-      message = 'Allow location access to see where you are on the map.'
-      action = (
-        <button onClick={requestLocation} style={buttonStyle}>
-          Allow location
-        </button>
-      )
-      break
-    case 'requesting':
-      message = 'Getting your location…'
-      break
     case 'insecure':
       message = `Location needs a secure connection. You are on ${window.location.origin} — open the app at http://localhost:5173 instead.`
       action = (
-        <button onClick={() => setStatus('dismissed')} style={buttonStyle}>
+        <button onClick={() => setStatus('idle')} style={buttonStyle}>
           Dismiss
         </button>
       )
@@ -209,7 +231,7 @@ export default function App() {
     case 'unsupported':
       message = 'Geolocation is not supported by this browser.'
       action = (
-        <button onClick={() => setStatus('dismissed')} style={buttonStyle}>
+        <button onClick={() => setStatus('idle')} style={buttonStyle}>
           Dismiss
         </button>
       )
@@ -220,7 +242,34 @@ export default function App() {
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <style>{`@keyframes fmap-spin { to { transform: rotate(360deg); } }`}</style>
+
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+
+      <button
+        type="button"
+        onClick={requestLocation}
+        disabled={locating}
+        title={locating ? 'Finding your location…' : 'Find my location'}
+        aria-label="Find my location"
+        style={{ ...locateButtonStyle, opacity: locating ? 0.7 : 1, cursor: locating ? 'wait' : 'pointer' }}
+      >
+        {locating ? (
+          <span
+            style={{
+              width: '18px',
+              height: '18px',
+              border: '2px solid #c7c7c7',
+              borderTopColor: '#1a73e8',
+              borderRadius: '50%',
+              animation: 'fmap-spin 0.8s linear infinite',
+            }}
+          />
+        ) : (
+          <LocateIcon />
+        )}
+      </button>
+
       {showCard && (
         <div style={cardStyle}>
           <span>{message}</span>
